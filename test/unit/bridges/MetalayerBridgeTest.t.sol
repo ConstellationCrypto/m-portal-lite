@@ -120,7 +120,7 @@ contract MetalayerBridgeTest is Test {
                 emptyReads,
                 payload_,
                 FinalityState.INSTANT,
-                bridge.DEFAULT_GAS_LIMIT()
+                gasLimit_
             ),
             abi.encode(routerFee_)
         );
@@ -143,6 +143,7 @@ contract MetalayerBridgeTest is Test {
     function test_quote_withDomainOverride() external {
         uint256 chainId = 111;
         uint32 customDomain = 999;
+        uint256 gasLimit_ = 200_000;
         bytes memory payload_ = bytes("payload");
         ReadOperation[] memory emptyReads = new ReadOperation[](0);
 
@@ -162,12 +163,12 @@ contract MetalayerBridgeTest is Test {
                 emptyReads,
                 payload_,
                 FinalityState.INSTANT,
-                bridge.DEFAULT_GAS_LIMIT()
+                gasLimit_
             ),
             abi.encode(1000)
         );
 
-        uint256 fee_ = bridge.quote(chainId, 200_000, payload_);
+        uint256 fee_ = bridge.quote(chainId, gasLimit_, payload_);
         assertEq(fee_, 1000);
     }
 
@@ -276,10 +277,6 @@ contract MetalayerBridgeTest is Test {
 
         vm.prank(router);
         bridge.handle(uint32(REMOTE_CHAIN_ID), sender_, bytes("payload"), reads, readResults);
-    }
-
-    function test_defaultGasLimit() external {
-        assertEq(bridge.DEFAULT_GAS_LIMIT(), 200_000);
     }
 
     function test_domainOverride_defaultBehavior() external {
