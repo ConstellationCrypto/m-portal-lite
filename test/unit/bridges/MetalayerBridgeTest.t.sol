@@ -356,7 +356,7 @@ contract MetalayerBridgeTest is Test {
 
         vm.deal(router, 1 ether);
 
-        vm.expectRevert(IMetalayerBridge.RefundFailed.selector);
+        vm.expectRevert(IMetalayerBridge.NoActiveRefund.selector);
         ETHSender(router).sendETH(payable(address(bridge)), 0.1 ether);
     }
 }

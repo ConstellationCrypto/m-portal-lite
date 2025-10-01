@@ -52,6 +52,9 @@ interface IMetalayerBridge is IBridge, IMetalayerRecipient {
     /// @notice Thrown when refunding excess ETH to the refund address fails.
     error RefundFailed();
 
+    /// @notice Thrown when ETH is received without an active refund context.
+    error NoActiveRefund();
+
     ///////////////////////////////////////////////////////////////////////////
     //                          VIEW/PURE FUNCTIONS                          //
     ///////////////////////////////////////////////////////////////////////////

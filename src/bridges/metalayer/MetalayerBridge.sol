@@ -152,7 +152,7 @@ contract MetalayerBridge is Ownable, IMetalayerBridge {
      */
     receive() external payable {
         if (msg.sender != router) revert NotRouter();
-        if (currentRefundAddress == address(0)) revert RefundFailed();
+        if (currentRefundAddress == address(0)) revert NoActiveRefund();
 
         (bool success,) = currentRefundAddress.call{ value: msg.value }("");
         if (!success) revert RefundFailed();
