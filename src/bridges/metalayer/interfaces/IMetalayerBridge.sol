@@ -49,6 +49,12 @@ interface IMetalayerBridge is IBridge, IMetalayerRecipient {
     /// @notice Thrown when the source chain isn't supported or configured peer doesn't match the sender.
     error UnsupportedSender(bytes32 sender);
 
+    /// @notice Thrown when refunding excess ETH to the refund address fails.
+    error RefundFailed();
+
+    /// @notice Thrown when ETH is received without an active refund context.
+    error NoActiveRefund();
+
     ///////////////////////////////////////////////////////////////////////////
     //                          VIEW/PURE FUNCTIONS                          //
     ///////////////////////////////////////////////////////////////////////////

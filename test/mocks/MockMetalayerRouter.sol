@@ -5,6 +5,9 @@ import { ReadOperation } from "../../src/bridges/metalayer/interfaces/IMetalayer
 import { FinalityState } from "../../src/bridges/metalayer/interfaces/IMetalayerRouter.sol";
 
 contract MockMetalayerRouter {
+    uint256 public refundAmount;
+    uint32 public nonce;
+
     function quoteDispatch(
         uint32,
         bytes32,
@@ -24,6 +27,15 @@ contract MockMetalayerRouter {
         FinalityState,
         uint256
     ) external payable {
-        // Mock dispatch function - does nothing but consumes gas
+        nonce++;  // Increment nonce on each dispatch
+
+        // Mock dispatch function - simulates refund if refundAmount is set
+        if (refundAmount > 0) {
+            payable(msg.sender).call{ value: refundAmount }("");
+        }
+    }
+
+    function setRefundAmount(uint256 amount_) external {
+        refundAmount = amount_;
     }
 } 

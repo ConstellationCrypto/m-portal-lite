@@ -18,9 +18,6 @@ contract MetalayerBridge is Ownable, IMetalayerBridge {
     using TypeConverter for *;
     using SafeCast for uint256;
 
-    /// @notice Default gas limit for Metalayer operations
-    uint256 public constant DEFAULT_GAS_LIMIT = 200_000;
-
     /// @inheritdoc IMetalayerBridge
     address public immutable router;
 
@@ -32,6 +29,9 @@ contract MetalayerBridge is Ownable, IMetalayerBridge {
 
     /// @notice Override mapping for custom domain IDs by chain ID
     mapping(uint256 chainId => uint32 domain) public domainOverride;
+
+    /// @notice Stores the refund address for the current sendMessage transaction
+    address private currentRefundAddress;
 
     /**
      * @notice Constructs Metalayer Bridge
@@ -48,7 +48,7 @@ contract MetalayerBridge is Ownable, IMetalayerBridge {
         bytes32 peer_ = _getPeer(destinationChainId_);
         uint32 destinationDomain_ = _getMetalayerDomain(destinationChainId_);   
 
-        fee_ = IMetalayerRouter(router).quoteDispatch(destinationDomain_, peer_, new ReadOperation[](0), payload_, FinalityState.INSTANT, DEFAULT_GAS_LIMIT);
+        fee_ = IMetalayerRouter(router).quoteDispatch(destinationDomain_, peer_, new ReadOperation[](0), payload_, FinalityState.INSTANT, gasLimit_);
     }
 
 
@@ -65,19 +65,26 @@ contract MetalayerBridge is Ownable, IMetalayerBridge {
         uint32 destinationDomain_ = _getMetalayerDomain(destinationChainId_);
         ReadOperation[] memory emptyReads_ = new ReadOperation[](0);
 
+        currentRefundAddress = refundAddress_;
+
         // NOTE: The transaction reverts if msg.value isn't enough to cover the fee.
-        //       If msg.value is greater than the required fee, the excess is sent to the refund address.
+        //       If msg.value is greater than the required fee, the router refunds excess to this contract,
+        //       which is then forwarded to refundAddress_ via the receive() function.
         IMetalayerRouter(router).dispatch{ value: msg.value }(
-            destinationDomain_, 
-            peer_, 
-            emptyReads_, 
-            payload_, 
-            FinalityState.INSTANT, 
+            destinationDomain_,
+            peer_,
+            emptyReads_,
+            payload_,
+            FinalityState.INSTANT,
             gasLimit_
         );
 
+        // Clear refund address after dispatch completes
+        currentRefundAddress = address(0);
+
         // Metalayer doesn't return a messageId, so we generate one from the transaction hash
-        messageId_ = keccak256(abi.encodePacked(block.timestamp, destinationChainId_, peer_, payload_));
+        uint32 nonce_ = IMetalayerRouter(router).nonce();
+        messageId_ = keccak256(abi.encodePacked(block.timestamp, destinationChainId_, peer_, payload_, nonce_));
     }
 
     /// @inheritdoc IMetalayerRecipient
@@ -136,5 +143,18 @@ contract MetalayerBridge is Ownable, IMetalayerBridge {
         if (domain_ == 0) {
             domain_ = evmChainId_.toUint32();
         }
+    }
+
+    /**
+     * @notice Receives ETH refunds from the Metalayer router and forwards them to the designated refund address.
+     * @dev    Called by the router when excess ETH is sent in sendMessage. The refund happens synchronously
+     *         during the dispatch call, so currentRefundAddress is safely set before this is invoked.
+     */
+    receive() external payable {
+        if (msg.sender != router) revert NotRouter();
+        if (currentRefundAddress == address(0)) revert NoActiveRefund();
+
+        (bool success,) = currentRefundAddress.call{ value: msg.value }("");
+        if (!success) revert RefundFailed();
     }
 }

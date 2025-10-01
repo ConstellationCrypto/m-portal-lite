@@ -120,7 +120,7 @@ contract MetalayerBridgeTest is Test {
                 emptyReads,
                 payload_,
                 FinalityState.INSTANT,
-                bridge.DEFAULT_GAS_LIMIT()
+                gasLimit_
             ),
             abi.encode(routerFee_)
         );
@@ -143,6 +143,7 @@ contract MetalayerBridgeTest is Test {
     function test_quote_withDomainOverride() external {
         uint256 chainId = 111;
         uint32 customDomain = 999;
+        uint256 gasLimit_ = 200_000;
         bytes memory payload_ = bytes("payload");
         ReadOperation[] memory emptyReads = new ReadOperation[](0);
 
@@ -162,12 +163,12 @@ contract MetalayerBridgeTest is Test {
                 emptyReads,
                 payload_,
                 FinalityState.INSTANT,
-                bridge.DEFAULT_GAS_LIMIT()
+                gasLimit_
             ),
             abi.encode(1000)
         );
 
-        uint256 fee_ = bridge.quote(chainId, 200_000, payload_);
+        uint256 fee_ = bridge.quote(chainId, gasLimit_, payload_);
         assertEq(fee_, 1000);
     }
 
@@ -278,12 +279,91 @@ contract MetalayerBridgeTest is Test {
         bridge.handle(uint32(REMOTE_CHAIN_ID), sender_, bytes("payload"), reads, readResults);
     }
 
-    function test_defaultGasLimit() external {
-        assertEq(bridge.DEFAULT_GAS_LIMIT(), 200_000);
-    }
-
     function test_domainOverride_defaultBehavior() external {
         // Without override, should return 0
         assertEq(bridge.domainOverride(REMOTE_CHAIN_ID), 0);
+    }
+
+    function test_sendMessage_uniqueMessageIds() external {
+        // This test verifies that the nonce ensures unique messageIds
+        // even when sending identical messages in the same block
+        uint256 gasLimit_ = 100_000;
+        bytes memory payload_ = bytes("identical payload");
+        uint256 value_ = 0.001 ether;
+        address refundAddress_ = makeAddr("refund");
+
+        vm.deal(portal, value_ * 2);
+
+        // Send first message
+        vm.prank(portal);
+        bytes32 messageId1_ = bridge.sendMessage{ value: value_ }(
+            REMOTE_CHAIN_ID,
+            gasLimit_,
+            refundAddress_,
+            payload_
+        );
+
+        // Send second identical message in the same block
+        vm.prank(portal);
+        bytes32 messageId2_ = bridge.sendMessage{ value: value_ }(
+            REMOTE_CHAIN_ID,
+            gasLimit_,
+            refundAddress_,
+            payload_
+        );
+
+        assertTrue(messageId1_ != messageId2_, "MessageIds should be unique");
+        assertEq(MockMetalayerRouter(router).nonce(), 2, "Nonce should have incremented twice");
+    }
+
+    function test_receive_notRouter() external {
+        ETHSender sender = new ETHSender();
+        vm.deal(address(sender), 1 ether);
+
+        vm.expectRevert(IMetalayerBridge.NotRouter.selector);
+        sender.sendETH(payable(address(bridge)), 0.1 ether);
+    }
+
+    function test_sendMessage_withRefund() external {
+        uint256 gasLimit_ = 100_000;
+        bytes memory payload_ = bytes("payload");
+        uint256 value_ = 1 ether;
+        uint256 refundAmount_ = 0.5 ether;
+        address refundAddress_ = makeAddr("refundAddress");
+
+        // Set the mock router to refund 0.5 ether
+        MockMetalayerRouter(router).setRefundAmount(refundAmount_);
+
+        uint256 refundAddressBalanceBefore = refundAddress_.balance;
+
+        vm.deal(portal, value_);
+        vm.prank(portal);
+
+        bridge.sendMessage{ value: value_ }(REMOTE_CHAIN_ID, gasLimit_, refundAddress_, payload_);
+
+        // Verify that the refund address received the refund
+        assertEq(refundAddress_.balance, refundAddressBalanceBefore + refundAmount_);
+    }
+
+    function test_receive_withoutActiveRefund() external {
+        // This test simulates a scenario where router tries to send ETH to bridge
+        // when there's no active sendMessage call (currentRefundAddress is 0)
+
+        // Deploy ETHSender at the router address using vm.etch
+        ETHSender sender = new ETHSender();
+        bytes memory senderCode = address(sender).code;
+        vm.etch(router, senderCode);
+
+        vm.deal(router, 1 ether);
+
+        vm.expectRevert(IMetalayerBridge.NoActiveRefund.selector);
+        ETHSender(router).sendETH(payable(address(bridge)), 0.1 ether);
+    }
+}
+
+// Helper contract that sends ETH to an address
+contract ETHSender {
+    function sendETH(address payable recipient, uint256 amount) external {
+        recipient.transfer(amount);
     }
 } 
