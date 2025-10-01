@@ -284,6 +284,38 @@ contract MetalayerBridgeTest is Test {
         assertEq(bridge.domainOverride(REMOTE_CHAIN_ID), 0);
     }
 
+    function test_sendMessage_uniqueMessageIds() external {
+        // This test verifies that the nonce ensures unique messageIds
+        // even when sending identical messages in the same block
+        uint256 gasLimit_ = 100_000;
+        bytes memory payload_ = bytes("identical payload");
+        uint256 value_ = 0.001 ether;
+        address refundAddress_ = makeAddr("refund");
+
+        vm.deal(portal, value_ * 2);
+
+        // Send first message
+        vm.prank(portal);
+        bytes32 messageId1_ = bridge.sendMessage{ value: value_ }(
+            REMOTE_CHAIN_ID,
+            gasLimit_,
+            refundAddress_,
+            payload_
+        );
+
+        // Send second identical message in the same block
+        vm.prank(portal);
+        bytes32 messageId2_ = bridge.sendMessage{ value: value_ }(
+            REMOTE_CHAIN_ID,
+            gasLimit_,
+            refundAddress_,
+            payload_
+        );
+
+        assertTrue(messageId1_ != messageId2_, "MessageIds should be unique");
+        assertEq(MockMetalayerRouter(router).nonce(), 2, "Nonce should have incremented twice");
+    }
+
     function test_receive_notRouter() external {
         ETHSender sender = new ETHSender();
         vm.deal(address(sender), 1 ether);

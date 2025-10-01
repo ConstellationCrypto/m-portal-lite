@@ -83,7 +83,8 @@ contract MetalayerBridge is Ownable, IMetalayerBridge {
         currentRefundAddress = address(0);
 
         // Metalayer doesn't return a messageId, so we generate one from the transaction hash
-        messageId_ = keccak256(abi.encodePacked(block.timestamp, destinationChainId_, peer_, payload_));
+        uint32 nonce_ = IMetalayerRouter(router).nonce();
+        messageId_ = keccak256(abi.encodePacked(block.timestamp, destinationChainId_, peer_, payload_, nonce_));
     }
 
     /// @inheritdoc IMetalayerRecipient

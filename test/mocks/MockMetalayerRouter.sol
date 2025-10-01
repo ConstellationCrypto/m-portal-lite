@@ -6,6 +6,7 @@ import { FinalityState } from "../../src/bridges/metalayer/interfaces/IMetalayer
 
 contract MockMetalayerRouter {
     uint256 public refundAmount;
+    uint32 public nonce;
 
     function quoteDispatch(
         uint32,
@@ -26,6 +27,8 @@ contract MockMetalayerRouter {
         FinalityState,
         uint256
     ) external payable {
+        nonce++;  // Increment nonce on each dispatch
+
         // Mock dispatch function - simulates refund if refundAmount is set
         if (refundAmount > 0) {
             payable(msg.sender).call{ value: refundAmount }("");

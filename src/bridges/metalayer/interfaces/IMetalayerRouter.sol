@@ -98,4 +98,11 @@ interface IMetalayerRouter {
         external
         view
         returns (uint256 fee);
+
+    /**
+     * @notice Returns the current nonce for message dispatch.
+     * @dev Used to generate unique message IDs.
+     * @return The current nonce value
+     */
+    function nonce() external view returns (uint32);
 }
