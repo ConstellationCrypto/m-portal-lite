@@ -283,4 +283,62 @@ contract MetalayerBridgeTest is Test {
         // Without override, should return 0
         assertEq(bridge.domainOverride(REMOTE_CHAIN_ID), 0);
     }
+
+    function test_receive_notRouter() external {
+        ETHSender sender = new ETHSender();
+        vm.deal(address(sender), 1 ether);
+
+        vm.expectRevert(IMetalayerBridge.NotRouter.selector);
+        sender.sendETH(payable(address(bridge)), 0.1 ether);
+    }
+
+    function test_sendMessage_withRefund() external {
+        uint256 gasLimit_ = 100_000;
+        bytes memory payload_ = bytes("payload");
+        uint256 value_ = 1 ether;
+        uint256 refundAmount_ = 0.5 ether;
+        address refundAddress_ = makeAddr("refundAddress");
+
+        // Set the mock router to refund 0.5 ether
+        MockMetalayerRouter(router).setRefundAmount(refundAmount_);
+
+        uint256 refundAddressBalanceBefore = refundAddress_.balance;
+
+        vm.deal(portal, value_);
+        vm.prank(portal);
+
+        bridge.sendMessage{ value: value_ }(REMOTE_CHAIN_ID, gasLimit_, refundAddress_, payload_);
+
+        // Verify that the refund address received the refund
+        assertEq(refundAddress_.balance, refundAddressBalanceBefore + refundAmount_);
+    }
+
+    function test_receive_withoutActiveRefund() external {
+        // This test simulates a scenario where router tries to send ETH to bridge
+        // when there's no active sendMessage call (currentRefundAddress is 0)
+
+        // Deploy ETHSender at the router address using vm.etch
+        ETHSender sender = new ETHSender();
+        bytes memory senderCode = address(sender).code;
+        vm.etch(router, senderCode);
+
+        vm.deal(router, 1 ether);
+
+        vm.expectRevert(IMetalayerBridge.RefundFailed.selector);
+        ETHSender(router).sendETH(payable(address(bridge)), 0.1 ether);
+    }
+}
+
+// Helper contract that rejects ETH transfers
+contract RejectingReceiver {
+    receive() external payable {
+        revert("Rejecting ETH");
+    }
+}
+
+// Helper contract that sends ETH to an address
+contract ETHSender {
+    function sendETH(address payable recipient, uint256 amount) external {
+        recipient.transfer(amount);
+    }
 } 
