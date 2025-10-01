@@ -361,13 +361,6 @@ contract MetalayerBridgeTest is Test {
     }
 }
 
-// Helper contract that rejects ETH transfers
-contract RejectingReceiver {
-    receive() external payable {
-        revert("Rejecting ETH");
-    }
-}
-
 // Helper contract that sends ETH to an address
 contract ETHSender {
     function sendETH(address payable recipient, uint256 amount) external {
