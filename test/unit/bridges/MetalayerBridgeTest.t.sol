@@ -11,14 +11,10 @@ import { ReadOperation } from "../../../src/bridges/metalayer/interfaces/IMetala
 import { FinalityState } from "../../../src/bridges/metalayer/interfaces/IMetalayerRouter.sol";
 import { IPortal } from "../../../src/interfaces/IPortal.sol";
 import { IBridge } from "../../../src/interfaces/IBridge.sol";
-import { TypeConverter } from "../../../src/libs/TypeConverter.sol";
-
 import { MockMetalayerRouter } from "../../mocks/MockMetalayerRouter.sol";
 import { MockPortal } from "../../mocks/MockPortal.sol";
 
 contract MetalayerBridgeTest is Test {
-    using TypeConverter for *;
-
     uint256 public constant REMOTE_CHAIN_ID = 111;
 
     address public owner = makeAddr("owner");
@@ -314,14 +310,6 @@ contract MetalayerBridgeTest is Test {
 
         assertTrue(messageId1_ != messageId2_, "MessageIds should be unique");
         assertEq(MockMetalayerRouter(router).nonce(), 2, "Nonce should have incremented twice");
-    }
-
-    function test_receive_notRouter() external {
-        ETHSender sender = new ETHSender();
-        vm.deal(address(sender), 1 ether);
-
-        vm.expectRevert(IMetalayerBridge.NotRouter.selector);
-        sender.sendETH(payable(address(bridge)), 0.1 ether);
     }
 
     function test_sendMessage_withRefund() external {

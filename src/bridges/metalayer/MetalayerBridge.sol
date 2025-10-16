@@ -9,13 +9,11 @@ import { IMetalayerBridge } from "./interfaces/IMetalayerBridge.sol";
 import { ReadOperation, IMetalayerRecipient } from "./interfaces/IMetalayerRecipient.sol";
 import { IMetalayerRouter } from "./interfaces/IMetalayerRouter.sol";
 import { IPortal } from "../../interfaces/IPortal.sol";
-import { TypeConverter } from "../../libs/TypeConverter.sol";
 import { FinalityState } from "./interfaces/IMetalayerRouter.sol";
 
 /// @title  Metalayer Bridge
 /// @notice Sends and receives messages to and from remote chains using Metalayer protocol
 contract MetalayerBridge is Ownable, IMetalayerBridge {
-    using TypeConverter for *;
     using SafeCast for uint256;
 
     /// @inheritdoc IMetalayerBridge
@@ -151,7 +149,6 @@ contract MetalayerBridge is Ownable, IMetalayerBridge {
      *         during the dispatch call, so currentRefundAddress is safely set before this is invoked.
      */
     receive() external payable {
-        if (msg.sender != router) revert NotRouter();
         if (currentRefundAddress == address(0)) revert NoActiveRefund();
 
         (bool success,) = currentRefundAddress.call{ value: msg.value }("");
