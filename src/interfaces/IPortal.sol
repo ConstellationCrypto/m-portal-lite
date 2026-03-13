@@ -108,6 +108,9 @@ interface IPortal {
     /// @notice Thrown when the Registrar address is 0x0.
     error ZeroRegistrar();
 
+    /// @notice Thrown when the Swap Facility address is 0x0.
+    error ZeroSwapFacility();
+
     /// @notice Thrown when the Bridge address is 0x0.
     error ZeroBridge();
 
@@ -135,9 +138,6 @@ interface IPortal {
     /// @notice Thrown when the destination chain id is equal to the source one.
     error InvalidDestinationChain(uint256 destinationChainId);
 
-    /// @notice Thrown when unwrapping `sourceToken` to M fails.
-    error UnwrapFailed(address sourceToken, uint256 amount);
-
     ///////////////////////////////////////////////////////////////////////////
     //                          VIEW/PURE FUNCTIONS                          //
     ///////////////////////////////////////////////////////////////////////////
@@ -153,6 +153,12 @@ interface IPortal {
 
     /// @notice The address of the Bridge contract responsible for cross-chain communication.
     function bridge() external view returns (address);
+
+    /// @notice The address of the Swap Facility contract.
+    function swapFacility() external view returns (address);
+
+    /// @notice The address of the original caller of `transfer` and `transferMLikeToken` functions.
+    function msgSender() external view returns (address);
 
     /**
      * @notice Returns the address of M token on the destination chain.

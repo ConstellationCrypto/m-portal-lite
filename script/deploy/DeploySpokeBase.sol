@@ -66,8 +66,7 @@ contract DeploySpokeBase is DeployBase {
         address bridge_,
         address deployer_
     ) internal returns (address portal_) {
-        uint256 hubChainId = Chains.getHubChainId(chainId_);
-        SpokePortal implementation_ = new SpokePortal(hubChainId, mToken_, registrar_);
+        SpokePortal implementation_ = new SpokePortal(mToken_, registrar_, _SWAP_FACILITY);
         bytes memory initializeCall = abi.encodeCall(IPortal.initialize, (bridge_, deployer_, deployer_));
         return _deployCreate3Proxy(address(implementation_), _computeSalt(deployer_, _PORTAL_CONTRACT_NAME), initializeCall);
     }
@@ -77,9 +76,10 @@ contract DeploySpokeBase is DeployBase {
         address spokePortal_,
         address hubVault_,
         uint256 hubChainId_,
-        address migrationAdmin_
+        address migrationAdmin_,
+        address wrappedMToken_
     ) internal returns (address spokeVaultImplementation_, address spokeVaultProxy_) {
-        spokeVaultImplementation_ = address(new SpokeVault(spokePortal_, hubVault_, hubChainId_, migrationAdmin_));
+        spokeVaultImplementation_ = address(new SpokeVault(spokePortal_, hubVault_, hubChainId_, migrationAdmin_, wrappedMToken_));
 
         spokeVaultProxy_ =
             _deployCreate3Proxy(address(spokeVaultImplementation_), _computeSalt(deployer_, _VAULT_CONTRACT_NAME), "");

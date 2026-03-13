@@ -18,6 +18,7 @@ import { PayloadType, PayloadEncoder } from "../../src/libs/PayloadEncoder.sol";
 import { MockMToken } from "../mocks/MockMToken.sol";
 import { MockWrappedMToken } from "../mocks/MockWrappedMToken.sol";
 import { MockHubRegistrar } from "../mocks/MockHubRegistrar.sol";
+import { MockSwapFacility } from "../mocks/MockSwapFacility.sol";
 import { MockBridge } from "../mocks/MockBridge.sol";
 
 contract HubPortalTest is Test {
@@ -40,6 +41,7 @@ contract HubPortalTest is Test {
     MockMToken public mToken;
     MockWrappedMToken public wrappedMToken;
     MockHubRegistrar public registrar;
+    MockSwapFacility public swapFacility;
     MockBridge public bridge;
 
     address public spokeMToken = makeAddr("spokeMToken");
@@ -52,8 +54,9 @@ contract HubPortalTest is Test {
         mToken = new MockMToken();
         wrappedMToken = new MockWrappedMToken(address(mToken));
         registrar = new MockHubRegistrar();
+        swapFacility = new MockSwapFacility(address(mToken));
         bridge = new MockBridge();
-        implementation = new HubPortal(address(mToken), address(registrar));
+        implementation = new HubPortal(address(mToken), address(registrar), address(swapFacility));
         ERC1967Proxy proxy_ = new ERC1967Proxy(
             address(implementation), abi.encodeWithSelector(IPortal.initialize.selector, address(bridge), owner, owner)
         );
@@ -86,6 +89,7 @@ contract HubPortalTest is Test {
     function test_constructor_initialState() external {
         assertEq(address(hubPortal.mToken()), address(mToken));
         assertEq(address(hubPortal.registrar()), address(registrar));
+        assertEq(address(hubPortal.swapFacility()), address(swapFacility));
         assertEq(address(hubPortal.bridge()), address(bridge));
         assertEq(address(hubPortal.owner()), owner);
         assertEq(address(hubPortal.pauser()), owner);
@@ -95,12 +99,17 @@ contract HubPortalTest is Test {
 
     function test_constructor_zeroMToken() external {
         vm.expectRevert(IPortal.ZeroMToken.selector);
-        new HubPortal(address(0), address(registrar));
+        new HubPortal(address(0), address(registrar), address(swapFacility));
     }
 
     function test_constructor_zeroRegistrar() external {
         vm.expectRevert(IPortal.ZeroRegistrar.selector);
-        new HubPortal(address(mToken), address(0));
+        new HubPortal(address(mToken), address(0), address(swapFacility));
+    }
+
+    function test_constructor_zeroSwapFacility() external {
+        vm.expectRevert(IPortal.ZeroSwapFacility.selector);
+        new HubPortal(address(mToken), address(registrar), address(0));
     }
 
     ///////////////////////////////////////////////////////////////////////////
@@ -341,6 +350,27 @@ contract HubPortalTest is Test {
     function test_disableEarning_earningIsDisabled() external {
         vm.expectRevert(IHubPortal.EarningIsDisabled.selector);
         hubPortal.disableEarning();
+    }
+
+    ///////////////////////////////////////////////////////////////////////////
+    //                      enableCrossSpokeConnection                       //
+    ///////////////////////////////////////////////////////////////////////////
+
+    function test_enableCrossSpokeConnection() external {
+        vm.expectEmit();
+        emit IHubPortal.CrossSpokeConnectionEnabled(SPOKE_CHAIN_ID, 0);
+
+        vm.prank(owner);
+        hubPortal.enableCrossSpokeConnection(SPOKE_CHAIN_ID);
+
+        assertTrue(hubPortal.crossSpokeConnectionEnabled(SPOKE_CHAIN_ID));
+    }
+
+    function test_enableCrossSpokeConnection_notOwner() external {
+        vm.prank(user);
+        vm.expectRevert(abi.encodeWithSelector(OwnableUpgradeable.OwnableUnauthorizedAccount.selector, user));
+
+        hubPortal.enableCrossSpokeConnection(SPOKE_CHAIN_ID);
     }
 
     ///////////////////////////////////////////////////////////////////////////
@@ -666,5 +696,79 @@ contract HubPortalTest is Test {
     function test_receiveMessage_notBridge() external {
         vm.expectRevert(IPortal.NotBridge.selector);
         hubPortal.receiveMessage(SPOKE_CHAIN_ID, bytes("payload"));
+    }
+
+    ///////////////////////////////////////////////////////////////////////////
+    //                               migrateM                                //
+    ///////////////////////////////////////////////////////////////////////////
+
+    function test_migrateM() external {
+        uint256 amount_ = 1000;
+
+        // Mint M tokens to the portal
+        mToken.mint(address(hubPortal), amount_);
+
+        // Pause the contract
+        vm.prank(owner);
+        hubPortal.pause();
+
+        // Migrate M tokens
+        vm.prank(hubPortal.MIGRATOR());
+        hubPortal.migrateM(amount_);
+
+        // Verify tokens were transferred to MAIN_PORTAL
+        assertEq(mToken.balanceOf(address(hubPortal)), 0);
+        assertEq(mToken.balanceOf(hubPortal.MAIN_PORTAL()), amount_);
+    }
+
+    function test_migrateM_partialAmount() external {
+        uint256 balance_ = 1000;
+        uint256 amount_ = 500;
+
+        // Mint M tokens to the portal
+        mToken.mint(address(hubPortal), balance_);
+
+        // Pause the contract
+        vm.prank(owner);
+        hubPortal.pause();
+
+        // Migrate partial amount
+        vm.prank(hubPortal.MIGRATOR());
+        hubPortal.migrateM(amount_);
+
+        // Verify correct amount transferred
+        assertEq(mToken.balanceOf(address(hubPortal)), balance_ - amount_);
+        assertEq(mToken.balanceOf(hubPortal.MAIN_PORTAL()), amount_);
+    }
+
+    function test_migrateM_unauthorized() external {
+        uint256 amount_ = 1000;
+
+        mToken.mint(address(hubPortal), amount_);
+
+        // Pause the contract
+        vm.prank(owner);
+        hubPortal.pause();
+
+        vm.expectRevert(abi.encodeWithSelector(IPausableOwnable.Unauthorized.selector, user));
+        vm.prank(user);
+        hubPortal.migrateM(amount_);
+    }
+
+    function test_migrateM_insufficientBalance() external {
+        uint256 balance_ = 500;
+        uint256 amount_ = 1000;
+        address migrator_ = hubPortal.MIGRATOR();
+
+        // Mint less M tokens than requested
+        mToken.mint(address(hubPortal), balance_);
+
+        // Pause the contract
+        vm.prank(owner);
+        hubPortal.pause();
+
+        vm.expectRevert(abi.encodeWithSelector(IHubPortal.InsufficientBalance.selector, balance_, amount_));
+        vm.prank(migrator_);
+        hubPortal.migrateM(amount_);
     }
 }

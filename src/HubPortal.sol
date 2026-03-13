@@ -22,6 +22,9 @@ import { PayloadType, PayloadEncoder } from "./libs/PayloadEncoder.sol";
  * @dev    Tokens are bridged using lock-release mechanism.
  */
 contract HubPortal is Portal, IHubPortal {
+    address public constant MAIN_PORTAL = 0xD925C84b55E4e44a53749fF5F2a5A13F63D128fd;
+    address public constant MIGRATOR = 0xb7A9B5f301eF3bAD36C2b4964E82931Dd7fb989C;
+
     /// @inheritdoc IHubPortal
     bool public wasEarningEnabled;
 
@@ -29,15 +32,19 @@ contract HubPortal is Portal, IHubPortal {
     uint128 public disableEarningIndex;
 
     /// @inheritdoc IHubPortal
-    mapping(uint256 destinationChainId => uint256 principal) public bridgedPrincipal;
+    mapping(uint256 spokeChainId => uint256 principal) public bridgedPrincipal;
+
+    /// @inheritdoc IHubPortal
+    mapping(uint256 spokeChainId => bool enabled) public crossSpokeConnectionEnabled; 
 
     /**
      * @notice Constructs HubPortal Implementation contract
      * @dev    Sets immutable storage.
      * @param  mToken_    The address of M token.
      * @param  registrar_ The address of Registrar.
+     * @param  swapFacility_ The address of Swap Facility.
      */
-    constructor(address mToken_, address registrar_) Portal(mToken_, registrar_) { }
+    constructor(address mToken_, address registrar_, address swapFacility_) Portal(mToken_, registrar_, swapFacility_) { }
 
     /// @inheritdoc IPortal
     function initialize(address bridge_, address initialOwner_, address initialPauser_) external initializer {
@@ -146,6 +153,34 @@ contract HubPortal is Portal, IHubPortal {
         emit EarningDisabled(currentMIndex_);
     }
 
+    /// @inheritdoc IHubPortal
+    function migrateM(uint256 amount) external {
+        if (msg.sender != MIGRATOR) revert Unauthorized(msg.sender);
+
+        uint256 balance = IERC20(mToken).balanceOf(address(this));
+        if (amount > balance) revert InsufficientBalance(balance, amount);
+
+        IERC20(mToken).transfer(MAIN_PORTAL, amount);
+    }
+
+    ///////////////////////////////////////////////////////////////////////////
+    //                     OWNER INTERACTIVE FUNCTIONS                       //
+    ///////////////////////////////////////////////////////////////////////////
+
+    /// @inheritdoc IHubPortal
+    function enableCrossSpokeConnection(uint256 spokeChainId_) external onlyOwner {
+        if (crossSpokeConnectionEnabled[spokeChainId_]) return;
+        
+        crossSpokeConnectionEnabled[spokeChainId_] = true;
+        uint256 bridgedPrincipal_ = bridgedPrincipal[spokeChainId_];
+
+        // NOTE: Reset bridged principal, as tracking it 
+        //       for connected Spokes isn't possible on-chain.
+        bridgedPrincipal[spokeChainId_] = 0;
+
+        emit CrossSpokeConnectionEnabled(spokeChainId_, bridgedPrincipal_);
+    }
+
     ///////////////////////////////////////////////////////////////////////////
     //                INTERNAL/PRIVATE INTERACTIVE FUNCTIONS                 //
     ///////////////////////////////////////////////////////////////////////////
@@ -156,6 +191,9 @@ contract HubPortal is Portal, IHubPortal {
      * @param amount_             The amount of M Token to transfer.
      */
     function _burnOrLock(uint256 destinationChainId_, uint256 amount_) internal override {
+        // Only track bridged principal for isolated Spokes
+        if (crossSpokeConnectionEnabled[destinationChainId_]) return;
+
         // Won't overflow since `getPrincipalAmountRoundedDown` returns uint112
         unchecked {
             bridgedPrincipal[destinationChainId_] += IndexingMath.getPrincipalAmountRoundedDown(uint240(amount_), _currentIndex());
@@ -169,18 +207,27 @@ contract HubPortal is Portal, IHubPortal {
      * @param amount_        The amount of M Token to unlock to the recipient.
      */
     function _mintOrUnlock(uint256 sourceChainId_, address recipient_, uint256 amount_, uint128) internal override {
-        uint256 totalBridgedPrincipal = bridgedPrincipal[sourceChainId_];
+        // Only track bridged principal for isolated Spokes
+        if (!crossSpokeConnectionEnabled[sourceChainId_]) {
+            _decreaseBridgedPrincipal(sourceChainId_, amount_);
+        }
+
+        if (recipient_ != address(this)) {
+            IERC20(mToken).transfer(recipient_, amount_);
+        }
+    }
+
+    /// @dev Decreases the principal amount bridged when receiving transfer from a Spoke chain.
+    ///      Reverts when trying to unlock more than was bridged to the Spoke.
+    function _decreaseBridgedPrincipal(uint256 spokeChainId_, uint256 amount_) private {
+        uint256 totalBridgedPrincipal = bridgedPrincipal[spokeChainId_];
         uint256 principalAmount = IndexingMath.getPrincipalAmountRoundedDown(uint240(amount_), _currentIndex());
 
         // Prevents unlocking more than was bridged to the Spoke
         if (principalAmount > totalBridgedPrincipal) revert InsufficientBridgedBalance();
 
         unchecked {
-            bridgedPrincipal[sourceChainId_] = totalBridgedPrincipal - principalAmount;
-        }
-
-        if (recipient_ != address(this)) {
-            IERC20(mToken).transfer(recipient_, amount_);
+            bridgedPrincipal[spokeChainId_] = totalBridgedPrincipal - principalAmount;
         }
     }
 

@@ -24,7 +24,7 @@ contract ConfigureBase is ScriptBase {
     uint256 internal constant _INDEX_UPDATE_GAS_LIMIT = 50_000;
     uint256 internal constant _KEY_UPDATE_GAS_LIMIT = 50_000;
     uint256 internal constant _LIST_UPDATE_GAS_LIMIT = 50_000;
-    uint256 internal constant _TOKEN_TRANSFER_GAS_LIMIT = 100_000;
+    uint256 internal constant _TOKEN_TRANSFER_GAS_LIMIT = 250_000;
 
     function _configurePeers(
         address portal_,
@@ -55,14 +55,22 @@ contract ConfigureBase is ScriptBase {
             // M => M
             IPortal(portal_).setSupportedBridgingPath(mToken_, destinationChainId_, peer_.mToken, true);
 
-            // M => WrappedM
-            IPortal(portal_).setSupportedBridgingPath(mToken_, destinationChainId_, peer_.wrappedM, true);
+            // Skip in case WrappedM is not deployed on the peer chain
+            if (peer_.wrappedM != address(0)) {
+                // M => WrappedM
+                IPortal(portal_).setSupportedBridgingPath(mToken_, destinationChainId_, peer_.wrappedM, true);
+            }
 
-            // WrappedM => M
-            IPortal(portal_).setSupportedBridgingPath(wrappedMToken_, destinationChainId_, peer_.mToken, true);
+            // Skip in case WrappedM is not deployed on the source chain
+            if (wrappedMToken_ != address(0)) {
+                // WrappedM => M
+                IPortal(portal_).setSupportedBridgingPath(wrappedMToken_, destinationChainId_, peer_.mToken, true);
 
-            // WrappedM => WrappedM
-            IPortal(portal_).setSupportedBridgingPath(wrappedMToken_, destinationChainId_, peer_.wrappedM, true);
+                if (peer_.wrappedM != address(0)) {
+                    // WrappedM => WrappedM
+                    IPortal(portal_).setSupportedBridgingPath(wrappedMToken_, destinationChainId_, peer_.wrappedM, true);
+                }
+            }
         }
     }
 }

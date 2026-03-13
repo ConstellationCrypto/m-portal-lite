@@ -24,6 +24,7 @@ contract HubPortalForkTest is Test {
     address public constant DEPLOYER = 0xF2f1ACbe0BA726fEE8d75f3E32900526874740BB;
     address public constant ETHEREUM_REGISTRAR = 0x119FbeeDD4F4f4298Fb59B720d5654442b81ae2c;
     address public constant ETHEREUM_M_TOKEN = 0x866A2BF4E572CbcF37D5071A7a58503Bfb36be1b;
+    address public constant ETHEREUM_SWAP_FACILITY = 0xB6807116b3B1B321a390594e31ECD6e0076f6278;
     address public constant HYPER_M_TOKEN = 0x866A2BF4E572CbcF37D5071A7a58503Bfb36be1b;
     address public constant ETHEREUM_MAILBOX = 0xc005dc82818d67AF737725bD4bf75435d065D239;
     address public constant M_HOLDER = 0x3f0376da3Ae4313E7a5F1dA184BAFC716252d759;
@@ -51,7 +52,7 @@ contract HubPortalForkTest is Test {
         uint256 nonce_ = vm.getNonce(DEPLOYER);
         address hubPortalAddress_ = vm.computeCreateAddress(DEPLOYER, nonce_ + 2);
         hubBridge = new HyperlaneBridge(ETHEREUM_MAILBOX, hubPortalAddress_, DEPLOYER);
-        HubPortal implementation = new HubPortal(ETHEREUM_M_TOKEN, ETHEREUM_REGISTRAR);
+        HubPortal implementation = new HubPortal(ETHEREUM_M_TOKEN, ETHEREUM_REGISTRAR, ETHEREUM_SWAP_FACILITY);
         ERC1967Proxy proxy_ = new ERC1967Proxy(
             address(implementation), abi.encodeWithSelector(IPortal.initialize.selector, address(hubBridge), DEPLOYER, DEPLOYER)
         );
@@ -75,7 +76,7 @@ contract HubPortalForkTest is Test {
         hubPortal.enableEarning();
     }
 
-    function test_transfer_bridgedPrincipal() external {
+    function test_transfer_bridgedPrincipal_isolated() external {
         uint256 amount_ = 1e6;
         address sender_ = M_HOLDER;
         address recipient_ = M_HOLDER;
@@ -105,6 +106,28 @@ contract HubPortalForkTest is Test {
 
         // Bridged Principal isn't zero since the index has increased
         assertEq(hubPortal.bridgedPrincipal(HYPEREVM_CHAIN_ID), 1);
+    }
+
+    function test_transfer_bridgedPrincipal_connected() external {
+        uint256 amount_ = 1e6;
+        address recipient_ = M_HOLDER;
+        address refundAddress_ = M_HOLDER;
+        uint256 fee_ = hubPortal.quoteTransfer(amount_, HYPEREVM_CHAIN_ID, recipient_);
+
+        vm.prank(hubPortal.owner());
+        hubPortal.enableCrossSpokeConnection(HYPEREVM_CHAIN_ID);
+
+        assertEq(hubPortal.bridgedPrincipal(HYPEREVM_CHAIN_ID), 0);
+
+        vm.startPrank(M_HOLDER);
+        IERC20(ETHEREUM_M_TOKEN).approve(address(hubPortal), amount_);
+        hubPortal.transfer{ value: fee_ }(amount_, HYPEREVM_CHAIN_ID, recipient_, refundAddress_);
+        vm.stopPrank();
+
+        assertEq(IERC20(ETHEREUM_M_TOKEN).balanceOf(address(hubPortal)), 999_999);
+
+        // Bridged principal isn't recorded for connected Spokes
+        assertEq(hubPortal.bridgedPrincipal(HYPEREVM_CHAIN_ID), 0);
     }
 
     function test_transfer_insufficientBalance() external {

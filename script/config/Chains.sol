@@ -10,20 +10,36 @@ library Chains {
     uint256 internal constant ETHEREUM = 1;
     uint256 internal constant HYPER_EVM = 999;
     uint256 internal constant PLUME = 98866;
+    uint256 internal constant LINEA = 59144;
+    uint256 internal constant BNB = 56;
+    uint256 internal constant MANTRA = 5888;
+    uint256 internal constant SONEIUM = 1868;
+    uint256 internal constant PLASMA = 9745;
+    uint256 internal constant CITREA = 4114;
+    uint256 internal constant ZG = 16661;
 
     // Testnet
     uint256 internal constant ETHEREUM_SEPOLIA = 11155111;
     uint256 internal constant HYPER_EVM_TESTNET = 998;
     uint256 internal constant PLUME_TESTNET = 98867;
+    uint256 internal constant BNB_TESTNET = 97;
 
     function getHubChainId(uint256 spokeChainId_) internal returns (uint256 hubChainId_) {
         // Mainnet
         if (spokeChainId_ == HYPER_EVM) return ETHEREUM;
         if (spokeChainId_ == PLUME) return ETHEREUM;
+        if (spokeChainId_ == LINEA) return ETHEREUM;
+        if (spokeChainId_ == BNB) return ETHEREUM;
+        if (spokeChainId_ == MANTRA) return ETHEREUM;
+        if (spokeChainId_ == SONEIUM) return ETHEREUM;
+        if (spokeChainId_ == PLASMA) return ETHEREUM;
+        if (spokeChainId_ == CITREA) return ETHEREUM;
+        if (spokeChainId_ == ZG) return ETHEREUM;
 
         // Testnet
         if (spokeChainId_ == HYPER_EVM_TESTNET) return ETHEREUM_SEPOLIA;
         if (spokeChainId_ == PLUME_TESTNET) return ETHEREUM_SEPOLIA;
+        if (spokeChainId_ == BNB_TESTNET) return ETHEREUM_SEPOLIA;
     }
 
     function isHub(uint256 chainId_) internal pure returns (bool) {

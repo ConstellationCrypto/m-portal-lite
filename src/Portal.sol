@@ -5,13 +5,12 @@ pragma solidity 0.8.26;
 import { IERC20 } from "../lib/common/src/interfaces/IERC20.sol";
 import { Migratable } from "../lib/common/src/Migratable.sol";
 import { IndexingMath } from "../lib/common/src/libs/IndexingMath.sol";
-import { ReentrancyGuardUpgradeable } from
-    "../lib/openzeppelin-contracts-upgradeable/contracts/utils/ReentrancyGuardUpgradeable.sol";
+import { ReentrancyLock } from "../lib/uniswap-v4-periphery/src/base/ReentrancyLock.sol";
 
 import { IPortal } from "./interfaces/IPortal.sol";
 import { IBridge } from "./interfaces/IBridge.sol";
+import { ISwapFacilityLike } from "./interfaces/ISwapFacilityLike.sol";
 import { PausableOwnableUpgradeable } from "./access/PausableOwnableUpgradeable.sol";
-import { IWrappedMTokenLike } from "./interfaces/IWrappedMTokenLike.sol";
 import { TypeConverter } from "./libs/TypeConverter.sol";
 import { SafeCall } from "./libs/SafeCall.sol";
 import { PayloadType, PayloadEncoder } from "./libs/PayloadEncoder.sol";
@@ -21,7 +20,7 @@ import { PayloadType, PayloadEncoder } from "./libs/PayloadEncoder.sol";
  * @author M^0 Labs
  * @notice Base Portal contract inherited by HubPortal and SpokePortal.
  */
-abstract contract Portal is IPortal, PausableOwnableUpgradeable, ReentrancyGuardUpgradeable, Migratable {
+abstract contract Portal is IPortal, PausableOwnableUpgradeable, ReentrancyLock, Migratable {
     using TypeConverter for *;
     using PayloadEncoder for bytes;
     using SafeCall for address;
@@ -31,6 +30,9 @@ abstract contract Portal is IPortal, PausableOwnableUpgradeable, ReentrancyGuard
 
     /// @inheritdoc IPortal
     address public immutable registrar;
+
+    /// @inheritdoc IPortal
+    address public immutable swapFacility;
 
     /// @inheritdoc IPortal
     address public bridge;
@@ -50,12 +52,14 @@ abstract contract Portal is IPortal, PausableOwnableUpgradeable, ReentrancyGuard
      * @dev    Sets immutable storage.
      * @param  mToken_    The address of M token.
      * @param  registrar_ The address of Registrar.
+     * @param  swapFacility_ The address of Swap Facility.
      */
-    constructor(address mToken_, address registrar_) {
+    constructor(address mToken_, address registrar_, address swapFacility_) {
         _disableInitializers();
 
         if ((mToken = mToken_) == address(0)) revert ZeroMToken();
         if ((registrar = registrar_) == address(0)) revert ZeroRegistrar();
+        if ((swapFacility = swapFacility_) == address(0)) revert ZeroSwapFacility();
     }
 
     /**
@@ -67,7 +71,6 @@ abstract contract Portal is IPortal, PausableOwnableUpgradeable, ReentrancyGuard
     function _initialize(address bridge_, address initialOwner_, address initialPauser_) internal onlyInitializing {
         if ((bridge = bridge_) == address(0)) revert ZeroBridge();
         __PausableOwnable_init(initialOwner_, initialPauser_);
-        __ReentrancyGuard_init();
     }
 
     ///////////////////////////////////////////////////////////////////////////
@@ -92,6 +95,11 @@ abstract contract Portal is IPortal, PausableOwnableUpgradeable, ReentrancyGuard
         return IBridge(bridge).quote(destinationChainId_, payloadGasLimit[destinationChainId_][PayloadType.Token], payload_);
     }
 
+    /// @inheritdoc IPortal
+    function msgSender() public view returns (address) {
+        return _getLocker();
+    }
+
     ///////////////////////////////////////////////////////////////////////////
     //                     EXTERNAL INTERACTIVE FUNCTIONS                    //
     ///////////////////////////////////////////////////////////////////////////
@@ -102,7 +110,7 @@ abstract contract Portal is IPortal, PausableOwnableUpgradeable, ReentrancyGuard
         uint256 destinationChainId_,
         address recipient_,
         address refundAddress_
-    ) external payable whenNotPaused nonReentrant returns (bytes32 messageId_) {
+    ) external payable whenNotPaused isNotLocked returns (bytes32 messageId_) {
         return _transferMLikeToken(
             amount_, mToken, destinationChainId_, destinationMToken[destinationChainId_], recipient_, refundAddress_
         );
@@ -116,7 +124,7 @@ abstract contract Portal is IPortal, PausableOwnableUpgradeable, ReentrancyGuard
         address destinationToken_,
         address recipient_,
         address refundAddress_
-    ) external payable whenNotPaused nonReentrant returns (bytes32 messageId_) {
+    ) external payable whenNotPaused isNotLocked returns (bytes32 messageId_) {
         if (!supportedBridgingPath[sourceToken_][destinationChainId_][destinationToken_]) {
             revert UnsupportedBridgingPath(sourceToken_, destinationChainId_, destinationToken_);
         }
@@ -212,7 +220,6 @@ abstract contract Portal is IPortal, PausableOwnableUpgradeable, ReentrancyGuard
         address refundAddress_
     ) private returns (bytes32 messageId_) {
         _revertIfZeroAmount(amount_);
-        _revertIfUnsupportedDestinationChain(destinationChainId_);
         _revertIfZeroRefundAddress(refundAddress_);
 
         if (destinationToken_ == address(0)) revert ZeroDestinationToken();
@@ -226,9 +233,8 @@ abstract contract Portal is IPortal, PausableOwnableUpgradeable, ReentrancyGuard
 
         // if the source token isn't M token, unwrap it
         if (sourceToken_ != address(mToken_)) {
-            // NOTE: using low-level call to allow unwrap functions with and without return value
-            bool success = sourceToken_.safeCall(abi.encodeCall(IWrappedMTokenLike.unwrap, (address(this), amount_)));
-            if (!success) revert UnwrapFailed(sourceToken_, amount_);
+            IERC20(sourceToken_).approve(swapFacility, amount_);
+            ISwapFacilityLike(swapFacility).swapOutM(sourceToken_, amount_, address(this));
         }
 
         // The actual amount of M tokens that Portal received from the sender.
@@ -312,26 +318,27 @@ abstract contract Portal is IPortal, PausableOwnableUpgradeable, ReentrancyGuard
     }
 
     /**
-     * @dev   Wraps M token to the token specified by `destinationWrappedToken_`.
+     * @dev   Wraps $M token to the token specified by `destinationWrappedToken_`.
      *        If wrapping fails transfers $M token to `recipient_`.
-     * @param mToken_                  The address of M token.
+     * @param mToken_                  The address of $M token.
      * @param destinationWrappedToken_ The address of the wrapped token.
      * @param recipient_               The account to receive wrapped token.
      * @param amount_                  The amount to wrap.
      */
     function _wrap(address mToken_, address destinationWrappedToken_, address recipient_, uint256 amount_) private {
-        IERC20(mToken_).approve(destinationWrappedToken_, amount_);
+        IERC20(mToken_).approve(swapFacility, amount_);
 
         // Attempt to wrap $M token
         // NOTE: the call might fail with out-of-gas exception
         //       even if the destination token is the valid wrapped M token.
         //       Recipients must support both $M and wrapped $M transfers.
-        bool success = destinationWrappedToken_.safeCall(abi.encodeCall(IWrappedMTokenLike.wrap, (recipient_, amount_)));
+        (bool success,) =
+            swapFacility.call(abi.encodeCall(ISwapFacilityLike.swapInM, (destinationWrappedToken_, amount_, recipient_)));
 
         if (!success) {
             emit WrapFailed(destinationWrappedToken_, recipient_, amount_);
             // Reset approval to prevent a potential double-spend attack
-            IERC20(mToken_).approve(destinationWrappedToken_, 0);
+            IERC20(mToken_).approve(swapFacility, 0);
             // Transfer $M token to the recipient
             IERC20(mToken_).transfer(recipient_, amount_);
         }
@@ -375,9 +382,6 @@ abstract contract Portal is IPortal, PausableOwnableUpgradeable, ReentrancyGuard
     function _revertIfZeroRefundAddress(address refundAddress_) internal pure {
         if (refundAddress_ == address(0)) revert ZeroRefundAddress();
     }
-
-    /// @dev Overridden in SpokePortal to allow bringing only to the Hub chain
-    function _revertIfUnsupportedDestinationChain(uint256 destinationChainId_) internal view virtual { }
 
     /// @inheritdoc Migratable
     function _getMigrator() internal pure override returns (address migrator_) {
